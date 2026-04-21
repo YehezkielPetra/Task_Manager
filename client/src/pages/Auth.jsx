@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
-import Swal from 'sweetalert2'; // Import SweetAlert2 untuk pop-up profesional
+import Swal from 'sweetalert2'; 
+import api from '../utils/api'; // Menggunakan instance api baru
 
 const Auth = ({ setToken, setUser }) => {
   const [isLogin, setIsLogin] = useState(true);
@@ -11,7 +11,6 @@ const Auth = ({ setToken, setUser }) => {
     rePassword: '' 
   });
 
-  // Fungsi Validasi Email menggunakan Regex
   const validateEmail = (email) => {
     return String(email)
       .toLowerCase()
@@ -23,13 +22,12 @@ const Auth = ({ setToken, setUser }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validasi Khusus untuk Register
     if (!isLogin) {
       if (!validateEmail(formData.email)) {
         return Swal.fire({
           icon: 'error',
           title: 'Email Tidak Valid',
-          text: 'Harap gunakan format email yang benar (contoh: user@company.com)',
+          text: 'Harap gunakan format email yang benar',
           confirmButtonColor: '#2563eb'
         });
       }
@@ -41,38 +39,26 @@ const Auth = ({ setToken, setUser }) => {
           confirmButtonColor: '#2563eb'
         });
       }
-      if (formData.password.length < 6) {
-        return Swal.fire({
-          icon: 'info',
-          title: 'Password Terlalu Pendek',
-          text: 'Gunakan minimal 6 karakter demi keamanan akun Anda.',
-          confirmButtonColor: '#2563eb'
-        });
-      }
     }
 
-    const url = isLogin 
-      ? 'http://localhost:5000/api/login' 
-      : 'http://localhost:5000/api/register';
+    // TENTUKAN ENDPOINT BERDASARKAN MODE
+    const endpoint = isLogin ? '/login' : '/register';
     
     try {
-      // Menampilkan loading pop-up saat proses request
       Swal.showLoading();
       
-      const res = await axios.post(url, formData);
+      // MENGGUNAKAN API INSTANCE
+      const res = await api.post(endpoint, formData);
       
-      Swal.close(); // Tutup loading
+      Swal.close(); 
 
       if (isLogin) {
-        // Simpan data ke localStorage
         localStorage.setItem('token', res.data.token);
         localStorage.setItem('user', JSON.stringify(res.data.user));
         
-        // Update state di App.jsx
         setToken(res.data.token);
         setUser(res.data.user);
 
-        // Pop-up Berhasil Login
         Swal.fire({
           icon: 'success',
           title: 'Login Berhasil',
@@ -81,20 +67,19 @@ const Auth = ({ setToken, setUser }) => {
           showConfirmButton: false
         });
       } else {
-        // Pop-up Berhasil Registrasi
         Swal.fire({
           icon: 'success',
           title: 'Registrasi Berhasil',
           text: 'Akun Anda telah terdaftar. Silakan login sekarang.',
           confirmButtonColor: '#2563eb'
         });
-        setIsLogin(true); // Pindah ke halaman login otomatis
+        setIsLogin(true); 
       }
     } catch (err) {
-      // Pop-up Error dari Backend
       Swal.fire({
         icon: 'error',
         title: 'Gagal',
+        // Jika server online memberikan respon error, tampilkan pesannya
         text: err.response?.data?.message || "Terjadi kesalahan pada koneksi server.",
         confirmButtonColor: '#ef4444'
       });
@@ -105,7 +90,6 @@ const Auth = ({ setToken, setUser }) => {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-zinc-950 p-6 font-sans">
       <div className="w-full max-w-md bg-white dark:bg-zinc-900 p-10 rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-zinc-800 transition-all duration-500">
         
-        {/* Logo & Header */}
         <div className="flex flex-col items-center mb-10">
           <div className="w-14 h-14 bg-blue-600 rounded-2xl mb-4 shadow-xl shadow-blue-500/30 flex items-center justify-center text-white text-2xl font-black">
             T
@@ -118,7 +102,6 @@ const Auth = ({ setToken, setUser }) => {
           </p>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 tracking-widest">Username</label>

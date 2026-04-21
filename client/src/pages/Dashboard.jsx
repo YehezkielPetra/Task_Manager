@@ -1,26 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../utils/api'; // Menggunakan instance api baru
 
 const Dashboard = ({ user }) => {
   const [stats, setStats] = useState({ todo: 0, inProgress: 0, done: 0 });
 
   useEffect(() => {
     const fetchStats = async () => {
-      const res = await axios.get('http://localhost:5000/api/tasks', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      const data = res.data;
-      setStats({
-        todo: data.filter(t => t.status === 'todo').length,
-        inProgress: data.filter(t => t.status === 'in progress').length,
-        done: data.filter(t => t.status === 'done').length,
-      });
+      try {
+        // Menggunakan instance 'api' dan endpoint relatif
+        const res = await api.get('/tasks', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+        
+        const data = res.data;
+        setStats({
+          todo: data.filter(t => t.status.toLowerCase().trim() === 'todo').length,
+          inProgress: data.filter(t => t.status.toLowerCase().trim() === 'in progress').length,
+          done: data.filter(t => t.status.toLowerCase().trim() === 'done').length,
+        });
+      } catch (err) {
+        console.error("Gagal mengambil statistik dashboard:", err);
+      }
     };
     fetchStats();
   }, []);
 
   const CardStat = ({ label, count, color }) => (
-    <div className="bg-white dark:bg-zinc-900 p-8 rounded-[2rem] border border-slate-100 dark:border-zinc-800 shadow-sm">
+    <div className="bg-white dark:bg-zinc-900 p-8 rounded-[2rem] border border-slate-100 dark:border-zinc-800 shadow-sm transition-all hover:scale-[1.02]">
       <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">{label}</p>
       <div className="flex items-end gap-2">
         <h3 className="text-4xl font-black dark:text-white">{count}</h3>
@@ -30,9 +36,11 @@ const Dashboard = ({ user }) => {
   );
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-5xl animate-in fade-in duration-700">
       <header className="mb-12">
-        <h2 className="text-4xl font-black tracking-tight dark:text-white">Welcome back, {user.username}! 👋</h2>
+        <h2 className="text-4xl font-black tracking-tight dark:text-white">
+          Welcome back, {user?.username || 'User'}! 👋
+        </h2>
         <p className="text-slate-500 mt-2">Berikut adalah ringkasan produktivitas Anda hari ini.</p>
       </header>
 
@@ -47,7 +55,9 @@ const Dashboard = ({ user }) => {
           <h3 className="text-2xl font-bold mb-2">Siap untuk berkolaborasi?</h3>
           <p className="opacity-80 max-w-sm text-sm">Undang rekan tim Anda dan mulai selesaikan proyek besar bersama-sama di menu Teams.</p>
         </div>
-        <div className="text-8xl opacity-20 font-black absolute -right-4 -bottom-4 tracking-tighter">TASKFLOW</div>
+        <div className="text-8xl opacity-20 font-black absolute -right-4 -bottom-4 tracking-tighter select-none">
+          TASKFLOW
+        </div>
       </div>
     </div>
   );
