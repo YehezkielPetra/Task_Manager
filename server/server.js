@@ -121,5 +121,60 @@ app.delete('/api/tasks/:id', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
+// API untuk mencari user berdasarkan username (Invite)
+app.post('/api/teams/invite', authenticateToken, async (req, res) => {
+    try {
+        const { username } = req.body;
+
+        // 1. Cari user di database
+        const [users] = await pool.execute(
+            "SELECT id, username FROM users WHERE username = ?", 
+            [username]
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({ message: "Username tidak ditemukan" });
+        }
+
+        const targetUser = users[0];
+
+        // 2. Cek apakah yang di-invite adalah diri sendiri
+        if (targetUser.id === req.user.id) {
+            return res.status(400).json({ message: "Tidak bisa mengundang diri sendiri" });
+        }
+
+        // 3. Masukkan ke tabel team_members (sesuai foto Workbench kamu)
+        // Kita beri default team_id = 1 untuk sementara jika kamu belum buat sistem multi-team
+        await pool.execute(
+            "INSERT INTO team_members (team_id, user_id) VALUES (?, ?)",
+            [1, targetUser.id]
+        );
+
+        res.json({ message: `Berhasil mengundang ${username}!` });
+    } catch (error) {
+        // Jika error karena sudah ada di tim (Duplicate Entry)
+        if (error.errno === 1062) {
+            return res.status(400).json({ message: "User sudah berada di tim ini" });
+        }
+        console.error(error);
+        res.status(500).json({ message: "Terjadi kesalahan koneksi database" });
+    }
+});
+
+// API untuk melihat siapa saja anggota tim (Opsional, agar daftar muncul di UI)
+app.get('/api/teams/members', authenticateToken, async (req, res) => {
+    try {
+        const [members] = await pool.execute(
+            `SELECT u.id, u.username, u.photo_profile 
+             FROM users u 
+             JOIN team_members tm ON u.id = tm.user_id 
+             WHERE tm.team_id = 1`
+        );
+        res.json(members);
+    } catch (error) {
+        res.status(500).json(error);
+    }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
