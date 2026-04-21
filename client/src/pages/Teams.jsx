@@ -21,8 +21,8 @@ const Teams = ({ token }) => {
     try {
       // Menggunakan instance 'api' dengan endpoint relatif
       await api.post('/teams/invite', 
-        { targetUsername: inviteUser, teamId: 1 }, 
-        { headers: { Authorization: `Bearer ${token}` } }
+      { username: inviteUser, teamId: 1 }, 
+      { headers: { Authorization: `Bearer ${token}` } }
       );
       
       Swal.fire({
