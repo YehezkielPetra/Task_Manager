@@ -85,9 +85,8 @@ app.put('/api/user/update', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// --- TASK CRUD (UPDATED: PEMISAHAN PERSONAL & TEAM) ---
+// --- TASK CRUD ---
 
-// 1. Ambil Task Pribadi (Hanya milik sendiri dan tidak terikat tim)
 app.get('/api/tasks/personal', authenticateToken, async (req, res) => {
     try {
         const [rows] = await pool.execute(
@@ -98,7 +97,6 @@ app.get('/api/tasks/personal', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// 2. Ambil Task Tim (Berdasarkan tim yang di-accept)
 app.get('/api/tasks/team', authenticateToken, async (req, res) => {
     try {
         const [rows] = await pool.execute(`
@@ -113,11 +111,9 @@ app.get('/api/tasks/team', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// 3. Create Task (Mendukung team_id)
 app.post('/api/tasks', authenticateToken, async (req, res) => {
     try {
         const { title, description, status, team_id } = req.body;
-        // Jika team_id ada, simpan sebagai team task, jika null simpan sebagai personal task
         await pool.execute(
             "INSERT INTO tasks (title, description, status, creator_id, team_id) VALUES (?, ?, ?, ?, ?)", 
             [title, description, status || 'todo', req.user.id, team_id || null]
@@ -243,6 +239,48 @@ app.put('/api/teams/accept', authenticateToken, async (req, res) => {
             [teamId, req.user.id]
         );
         res.json({ message: "Berhasil bergabung dengan tim!" });
+    } catch (error) { res.status(500).json(error); }
+});
+
+// --- FITUR DISBAND & KICK (NEW) ---
+
+// Membubarkan Tim (Hanya Leader)
+app.delete('/api/teams/:id', authenticateToken, async (req, res) => {
+    try {
+        const teamId = req.params.id;
+        const [team] = await pool.execute("SELECT leader_id FROM teams WHERE id = ?", [teamId]);
+        
+        if (team.length === 0) return res.status(404).json({ message: "Tim tidak ditemukan" });
+        if (team[0].leader_id !== req.user.id) {
+            return res.status(403).json({ message: "Hanya ketua tim yang bisa membubarkan tim!" });
+        }
+
+        // Hapus semua relasi member dan data tim itu sendiri
+        await pool.execute("DELETE FROM team_members WHERE team_id = ?", [teamId]);
+        await pool.execute("DELETE FROM teams WHERE id = ?", [teamId]);
+
+        res.json({ message: "Tim berhasil dibubarkan." });
+    } catch (error) { res.status(500).json(error); }
+});
+
+// Mengeluarkan Member (Hanya Leader)
+app.delete('/api/teams/:teamId/kick/:userId', authenticateToken, async (req, res) => {
+    try {
+        const { teamId, userId } = req.params;
+
+        // Cek otoritas leader
+        const [team] = await pool.execute("SELECT leader_id FROM teams WHERE id = ?", [teamId]);
+        if (team.length === 0 || team[0].leader_id !== req.user.id) {
+            return res.status(403).json({ message: "Hanya ketua tim yang bisa mengeluarkan anggota!" });
+        }
+
+        // Mencegah leader menendang diri sendiri
+        if (parseInt(userId) === req.user.id) {
+            return res.status(400).json({ message: "Anda tidak bisa mengeluarkan diri sendiri dari sini. Gunakan Disband." });
+        }
+
+        await pool.execute("DELETE FROM team_members WHERE team_id = ? AND user_id = ?", [teamId, userId]);
+        res.json({ message: "Anggota berhasil dikeluarkan." });
     } catch (error) { res.status(500).json(error); }
 });
 
