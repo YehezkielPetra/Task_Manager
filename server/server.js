@@ -7,29 +7,23 @@ require('dotenv').config();
 
 const app = express();
 
-// --- MIDDLEWARE ---
 app.use(cors());
-// Limit diperbesar untuk mendukung upload foto profile Base64
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Konfigurasi Database
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASS,
     database: process.env.DB_NAME,
-    port: process.env.DB_PORT || 11696, // Tambahkan port eksplisit
+    port: process.env.DB_PORT || 11696,
     waitForConnections: true,
     connectionLimit: 10,
-    ssl: {
-        rejectUnauthorized: false
-    }
+    ssl: { rejectUnauthorized: false }
 });
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Middleware Proteksi
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -69,108 +63,68 @@ app.post('/api/login', async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// --- PROFILE UPDATE ---
-app.put('/api/user/update', authenticateToken, async (req, res) => {
-    try {
-        const { username, photo, password } = req.body;
-        let sql = "UPDATE users SET username = ?, photo_profile = ? WHERE id = ?";
-        let params = [username, photo, req.user.id];
+// --- TEAMS API ---
 
-        if (password && password.trim() !== "") {
-            const hash = await bcrypt.hash(password, 10);
-            sql = "UPDATE users SET username = ?, photo_profile = ?, password = ? WHERE id = ?";
-            params = [username, photo, hash, req.user.id];
-        }
-        await pool.execute(sql, params);
-        res.json({ message: "Profil diperbarui" });
-    } catch (error) { res.status(500).json(error); }
-});
-
-// --- TASK CRUD ---
-app.get('/api/tasks', authenticateToken, async (req, res) => {
-    try {
-        const [rows] = await pool.execute("SELECT * FROM tasks WHERE creator_id = ? ORDER BY created_at DESC", [req.user.id]);
-        res.json(rows);
-    } catch (error) { res.status(500).json(error); }
-});
-
-app.post('/api/tasks', authenticateToken, async (req, res) => {
-    try {
-        const { title, description, status } = req.body;
-        await pool.execute("INSERT INTO tasks (title, description, status, creator_id) VALUES (?, ?, ?, ?)", [title, description, status || 'todo', req.user.id]);
-        res.json({ message: "Task Created" });
-    } catch (error) { res.status(500).json(error); }
-});
-
-app.put('/api/tasks/:id', authenticateToken, async (req, res) => {
-    try {
-        const { title, description, status } = req.body;
-        // Menggunakan COALESCE agar jika field tidak dikirim (null), data lama tetap bertahan
-        const [result] = await pool.execute(
-            "UPDATE tasks SET title = COALESCE(?, title), description = COALESCE(?, description), status = COALESCE(?, status) WHERE id = ? AND creator_id = ?",
-            [title || null, description || null, status || null, req.params.id, req.user.id]
-        );
-        res.json({ message: "Tugas diperbarui" });
-    } catch (error) { res.status(500).json(error); }
-});
-
-app.delete('/api/tasks/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.execute("DELETE FROM tasks WHERE id = ? AND creator_id = ?", [req.params.id, req.user.id]);
-        res.json({ message: "Deleted" });
-    } catch (error) { res.status(500).json(error); }
-});
-
-// API untuk mencari user berdasarkan username (Invite)
+// 1. Kirim Undangan (Status otomatis: pending)
 app.post('/api/teams/invite', authenticateToken, async (req, res) => {
     try {
         const { username } = req.body;
+        if (!username) return res.status(400).json({ message: "Username harus diisi" });
 
-        // Validasi: Jika username tidak dikirim dari frontend
-        if (!username) {
-            return res.status(400).json({ message: "Username harus diisi" });
-        }
+        const [users] = await pool.execute("SELECT id FROM users WHERE username = ?", [username]);
+        if (users.length === 0) return res.status(404).json({ message: "Username tidak ditemukan" });
 
-        const [users] = await pool.execute(
-            "SELECT id, username FROM users WHERE username = ?", 
-            [username] // Baris inilah yang tadinya undefined
-        );
+        const targetUserId = users[0].id;
+        if (targetUserId === req.user.id) return res.status(400).json({ message: "Tidak bisa mengundang diri sendiri" });
 
-        if (users.length === 0) {
-            return res.status(404).json({ message: "Username tidak ditemukan" });
-        }
-
-        const targetUser = users[0];
-
-        if (targetUser.id === req.user.id) {
-            return res.status(400).json({ message: "Tidak bisa mengundang diri sendiri" });
-        }
-
+        // team_id = 1 sebagai default team
         await pool.execute(
-            "INSERT IGNORE INTO team_members (team_id, user_id) VALUES (?, ?)",
-            [1, targetUser.id]
+            "INSERT IGNORE INTO team_members (team_id, user_id, status) VALUES (?, ?, 'pending')",
+            [1, targetUserId]
         );
 
-        res.json({ message: `Berhasil mengundang ${username}!` });
+        res.json({ message: `Undangan berhasil dikirim ke ${username}` });
     } catch (error) {
-        console.error("Database Error:", error);
-        res.status(500).json({ message: "Terjadi kesalahan koneksi database" });
+        res.status(500).json({ message: "Gagal mengirim undangan" });
     }
 });
 
-// API untuk melihat siapa saja anggota tim (Opsional, agar daftar muncul di UI)
-app.get('/api/teams/members', authenticateToken, async (req, res) => {
+// 2. Ambil daftar undangan pending untuk user yang login
+app.get('/api/teams/invitations', authenticateToken, async (req, res) => {
     try {
-        const [members] = await pool.execute(
-            `SELECT u.id, u.username, u.photo_profile 
-             FROM users u 
-             JOIN team_members tm ON u.id = tm.user_id 
-             WHERE tm.team_id = 1`
+        const [invites] = await pool.execute(`
+            SELECT tm.team_id, t.name as team_name 
+            FROM team_members tm
+            JOIN teams t ON tm.team_id = t.id
+            WHERE tm.user_id = ? AND tm.status = 'pending'
+        `, [req.user.id]);
+        res.json(invites);
+    } catch (error) { res.status(500).json(error); }
+});
+
+// 3. Terima Undangan (Ubah status ke accepted)
+app.put('/api/teams/accept', authenticateToken, async (req, res) => {
+    try {
+        const { teamId } = req.body;
+        await pool.execute(
+            "UPDATE team_members SET status = 'accepted' WHERE team_id = ? AND user_id = ?",
+            [teamId, req.user.id]
         );
-        res.json(members);
-    } catch (error) {
-        res.status(500).json(error);
-    }
+        res.json({ message: "Selamat! Anda telah bergabung ke tim." });
+    } catch (error) { res.status(500).json(error); }
+});
+
+// --- TASK API (Update Filter: Muncul jika sudah accepted) ---
+app.get('/api/tasks', authenticateToken, async (req, res) => {
+    try {
+        const [rows] = await pool.execute(`
+            SELECT DISTINCT t.* FROM tasks t
+            LEFT JOIN team_members tm ON t.team_id = tm.team_id
+            WHERE t.creator_id = ? OR (tm.user_id = ? AND tm.status = 'accepted')
+            ORDER BY t.created_at DESC
+        `, [req.user.id, req.user.id]);
+        res.json(rows);
+    } catch (error) { res.status(500).json(error); }
 });
 
 const PORT = process.env.PORT || 5000;
