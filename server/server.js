@@ -126,10 +126,14 @@ app.post('/api/teams/invite', authenticateToken, async (req, res) => {
     try {
         const { username } = req.body;
 
-        // 1. Cari user di database
+        // Validasi: Jika username tidak dikirim dari frontend
+        if (!username) {
+            return res.status(400).json({ message: "Username harus diisi" });
+        }
+
         const [users] = await pool.execute(
             "SELECT id, username FROM users WHERE username = ?", 
-            [username]
+            [username] // Baris inilah yang tadinya undefined
         );
 
         if (users.length === 0) {
@@ -138,25 +142,18 @@ app.post('/api/teams/invite', authenticateToken, async (req, res) => {
 
         const targetUser = users[0];
 
-        // 2. Cek apakah yang di-invite adalah diri sendiri
         if (targetUser.id === req.user.id) {
             return res.status(400).json({ message: "Tidak bisa mengundang diri sendiri" });
         }
 
-        // 3. Masukkan ke tabel team_members (sesuai foto Workbench kamu)
-        // Kita beri default team_id = 1 untuk sementara jika kamu belum buat sistem multi-team
         await pool.execute(
-            "INSERT INTO team_members (team_id, user_id) VALUES (?, ?)",
+            "INSERT IGNORE INTO team_members (team_id, user_id) VALUES (?, ?)",
             [1, targetUser.id]
         );
 
         res.json({ message: `Berhasil mengundang ${username}!` });
     } catch (error) {
-        // Jika error karena sudah ada di tim (Duplicate Entry)
-        if (error.errno === 1062) {
-            return res.status(400).json({ message: "User sudah berada di tim ini" });
-        }
-        console.error(error);
+        console.error("Database Error:", error);
         res.status(500).json({ message: "Terjadi kesalahan koneksi database" });
     }
 });
