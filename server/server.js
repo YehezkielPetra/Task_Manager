@@ -19,8 +19,12 @@ const pool = mysql.createPool({
     user: process.env.DB_USER,
     password: process.env.DB_PASS,
     database: process.env.DB_NAME,
+    port: process.env.DB_PORT || 11696, // Tambahkan port eksplisit
     waitForConnections: true,
-    connectionLimit: 10
+    connectionLimit: 10,
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
 const JWT_SECRET = process.env.JWT_SECRET;
