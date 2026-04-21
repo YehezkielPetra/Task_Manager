@@ -85,25 +85,44 @@ app.put('/api/user/update', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// --- TASK CRUD ---
-app.get('/api/tasks', authenticateToken, async (req, res) => {
+// --- TASK CRUD (UPDATED: PEMISAHAN PERSONAL & TEAM) ---
+
+// 1. Ambil Task Pribadi (Hanya milik sendiri dan tidak terikat tim)
+app.get('/api/tasks/personal', authenticateToken, async (req, res) => {
     try {
-        const [rows] = await pool.execute(`
-            SELECT DISTINCT t.* FROM tasks t
-            LEFT JOIN team_members tm ON t.team_id = tm.team_id
-            WHERE t.creator_id = ? 
-            OR (tm.user_id = ? AND tm.status = 'accepted')
-            ORDER BY t.created_at DESC
-        `, [req.user.id, req.user.id]);
+        const [rows] = await pool.execute(
+            "SELECT * FROM tasks WHERE creator_id = ? AND team_id IS NULL ORDER BY created_at DESC", 
+            [req.user.id]
+        );
         res.json(rows);
     } catch (error) { res.status(500).json(error); }
 });
 
+// 2. Ambil Task Tim (Berdasarkan tim yang di-accept)
+app.get('/api/tasks/team', authenticateToken, async (req, res) => {
+    try {
+        const [rows] = await pool.execute(`
+            SELECT t.*, u.username as creator_name 
+            FROM tasks t
+            JOIN team_members tm ON t.team_id = tm.team_id
+            JOIN users u ON t.creator_id = u.id
+            WHERE tm.user_id = ? AND tm.status = 'accepted' AND t.team_id IS NOT NULL
+            ORDER BY t.created_at DESC
+        `, [req.user.id]);
+        res.json(rows);
+    } catch (error) { res.status(500).json(error); }
+});
+
+// 3. Create Task (Mendukung team_id)
 app.post('/api/tasks', authenticateToken, async (req, res) => {
     try {
-        const { title, description, status } = req.body;
-        await pool.execute("INSERT INTO tasks (title, description, status, creator_id) VALUES (?, ?, ?, ?)", [title, description, status || 'todo', req.user.id]);
-        res.json({ message: "Task Created" });
+        const { title, description, status, team_id } = req.body;
+        // Jika team_id ada, simpan sebagai team task, jika null simpan sebagai personal task
+        await pool.execute(
+            "INSERT INTO tasks (title, description, status, creator_id, team_id) VALUES (?, ?, ?, ?, ?)", 
+            [title, description, status || 'todo', req.user.id, team_id || null]
+        );
+        res.json({ message: "Task Created Successfully" });
     } catch (error) { res.status(500).json(error); }
 });
 
@@ -127,7 +146,6 @@ app.delete('/api/tasks/:id', authenticateToken, async (req, res) => {
 
 // --- ADVANCED TEAMS API ---
 
-// 1. Ambil data Tim Saya (Info, Leader, Anggota)
 app.get('/api/teams/my-team', authenticateToken, async (req, res) => {
     try {
         const [membership] = await pool.execute(`
@@ -159,7 +177,6 @@ app.get('/api/teams/my-team', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// 2. Membuat Team Baru (Leader)
 app.post('/api/teams/create', authenticateToken, async (req, res) => {
     try {
         const { teamName } = req.body;
@@ -181,13 +198,11 @@ app.post('/api/teams/create', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// 3. Invite Member (Hanya Leader yang bisa)
 app.post('/api/teams/invite', authenticateToken, async (req, res) => {
     try {
         const { username, teamId } = req.body;
         if (!username) return res.status(400).json({ message: "Username harus diisi" });
 
-        // Validasi Kepemimpinan
         const [team] = await pool.execute("SELECT leader_id FROM teams WHERE id = ?", [teamId]);
         if (team.length === 0 || team[0].leader_id !== req.user.id) {
             return res.status(403).json({ message: "Hanya ketua tim yang bisa mengundang!" });
@@ -208,7 +223,6 @@ app.post('/api/teams/invite', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// 4. Daftar Undangan Pending
 app.get('/api/teams/invitations', authenticateToken, async (req, res) => {
     try {
         const [invites] = await pool.execute(`
@@ -221,7 +235,6 @@ app.get('/api/teams/invitations', authenticateToken, async (req, res) => {
     } catch (error) { res.status(500).json(error); }
 });
 
-// 5. Terima Undangan
 app.put('/api/teams/accept', authenticateToken, async (req, res) => {
     try {
         const { teamId } = req.body;
